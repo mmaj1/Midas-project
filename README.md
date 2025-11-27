@@ -1,6 +1,7 @@
  $ 
  
-python main.py 
+python main.py   
+
 --- uruchamia synthetic/render_scene.py, który tworzy:
 obraz rgb_0001.png,
 prawdziwą mapę głębi depth_gt_0001.npy
