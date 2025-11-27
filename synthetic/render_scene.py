@@ -1,58 +1,138 @@
-"""
-Prosty generator przykładowej sceny.
-
-Tworzy:
- - obraz RGB 256x256 z jasnym kwadratem na ciemnym tle
- - mapę głębi:
-      tło  = 5.0 (daleko)
-      kwadrat = 2.0 (bliżej)
-
-Zapis:
- - synthetic/output/rgb_0001.png
- - synthetic/output/depth_gt_0001.npy
-"""
-
 import os
 import numpy as np
-import cv2
+import torch
+from PIL import Image
 
-# katalog synthetic/output obok tego pliku
+from pytorch3d.structures import Meshes
+from pytorch3d.renderer import (
+    FoVPerspectiveCameras,
+    RasterizationSettings,
+    MeshRenderer,
+    MeshRasterizer,
+    HardPhongShader,
+    PointLights,
+    TexturesVertex,
+)
+from pytorch3d.io import load_objs_as_meshes
+from pytorch3d.renderer import look_at_view_transform
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output")
 
 
-def main():
-    print("=== render_scene.py ===")
-    print("OUTPUT_DIR:", OUTPUT_DIR)
+def create_cube(size=1.0):
+    """
+    Tworzy sześcian 3D o boku size, wycentrowany w (0,0,0).
+    Zwraca mesh PyTorch3D.
+    """
 
-    # utworzenie katalogu, jeśli nie istnieje
+    verts = torch.tensor([
+        [-size, -size, -size],
+        [ size, -size, -size],
+        [ size,  size, -size],
+        [-size,  size, -size],
+        [-size, -size,  size],
+        [ size, -size,  size],
+        [ size,  size,  size],
+        [-size,  size,  size],
+    ], dtype=torch.float32)
+
+    faces = torch.tensor([
+        [0,1,2], [0,2,3],
+        [4,5,6], [4,6,7],
+        [0,1,5], [0,5,4],
+        [2,3,7], [2,7,6],
+        [1,2,6], [1,6,5],
+        [0,3,7], [0,7,4],
+    ], dtype=torch.int64)
+
+    # kolor (błękitny)
+    verts_rgb = torch.tensor([[0.6, 0.6, 0.9]]).repeat(verts.shape[0], 1)
+
+    # DODAJEMY WYMIAR PARTII (batch)
+    verts_rgb = verts_rgb.unsqueeze(0)  # (1, 8, 3)
+
+    textures = TexturesVertex(verts_features=verts_rgb.to(device))
+
+    mesh = Meshes(
+        verts=[verts.to(device)],
+        faces=[faces.to(device)],
+        textures=textures
+    )
+    return mesh
+
+
+
+def render_scene():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # rozmiar obrazu
-    h, w = 256, 256
+    print("[render_scene] Tworzę scenę 3D...")
 
-    # obraz RGB: ciemne tło
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    rgb[:] = (40, 40, 40)  # ciemnoszary
+    # 1. Kamera (z góry patrząca w stronę obiektu)
+    R, T = look_at_view_transform(
+    dist=8.0,     # odległość kamery od środka sceny
+    elev=20.0,    # kąt podniesienia kamery w górę
+    azim=30.0     # obrót wokół osi Y
+)
 
-    # jasny kwadrat w środku
-    x1, y1 = 64, 64
-    x2, y2 = 192, 192
-    cv2.rectangle(rgb, (x1, y1), (x2, y2), (220, 220, 220), thickness=-1)
+    cameras = FoVPerspectiveCameras(
+        device=device,
+        R=R,
+        T=T,
+        fov=40.0
+)
 
-    # mapa głębi: tło = 5.0, kwadrat = 2.0
-    depth = np.full((h, w), 5.0, dtype=np.float32)
-    depth[y1:y2, x1:x2] = 2.0
+    # 2. Światło
+    lights = PointLights(device=device, location=[[2.0, 2.0, 2.0]])
 
-    # ścieżki do zapisania
+    # 3. Obiekt – sześcian
+    cube = create_cube(size=1.0)
+
+    # 4. Ustawienia rasteryzacji
+    raster_settings = RasterizationSettings(
+        image_size=512,
+        blur_radius=0.0,
+        faces_per_pixel=1,
+    )
+
+    # 5. Renderer
+    renderer = MeshRenderer(
+        rasterizer=MeshRasterizer(
+            cameras=cameras,
+            raster_settings=raster_settings
+        ),
+        shader=HardPhongShader(
+            cameras=cameras,
+            lights=lights,
+            device=device
+        )
+    )
+
+    # Render RGB
+    rgb = renderer(cube)
+    rgb_image = (rgb[0, ..., :3].cpu().numpy() * 255).astype(np.uint8)
+
+    # Render depth map z z-buffer
+    fragments = renderer.rasterizer(cube)
+    depth = fragments.zbuf[0].cpu().numpy()
+    depth = depth[..., 0]     
+    # Zapis RGB
     rgb_path = os.path.join(OUTPUT_DIR, "rgb_0001.png")
-    depth_path = os.path.join(OUTPUT_DIR, "depth_gt_0001.npy")
+    Image.fromarray(rgb_image).save(rgb_path)
 
-    # UWAGA: cv2 zapisuje w BGR, więc konwersja z RGB -> BGR
-    cv2.imwrite(rgb_path, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+    # Zapis depth (metry!)
+    depth_path = os.path.join(OUTPUT_DIR, "depth_gt_0001.npy")
     np.save(depth_path, depth)
 
-    print(f"[render_scene] Zapisano RGB:   {rgb_path}")
-    print(f"[render_scene] Zapisano depth: {depth_path}")
+    print("[render_scene] Zapisano:")
+    print(" - RGB:", rgb_path)
+    print(" - Depth GT:", depth_path)
+
+
+def main():
+    render_scene()
 
 
 if __name__ == "__main__":
