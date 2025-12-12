@@ -1,8 +1,7 @@
 """
-Implementacja podstawowych metryk:
- - RMSE
- - AbsRel
- - δ < 1.25
+  RMSE
+  AbsRel
+  δ < 1.25
 """
 
 import torch
