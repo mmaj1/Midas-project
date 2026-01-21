@@ -4,6 +4,26 @@ import json
 import numpy as np
 from metrics import compute_rmse, compute_abs_rel, compute_delta1
 
+def make_eval_mask(gt: torch.Tensor, max_depth=10.0, border=3):
+    """
+    Maskuje:
+    - gt > 0
+    - gt < max_depth
+    - usuwa piksele przy krawędziach obrazu
+    """
+    H, W = gt.shape
+
+    mask = torch.isfinite(gt)
+    mask &= gt > 0
+    mask &= gt < max_depth
+
+    if border > 0:
+        mask[:border, :] = False
+        mask[-border:, :] = False
+        mask[:, :border] = False
+        mask[:, -border:] = False
+
+    return mask
 
 def align_scale(pred: torch.Tensor, gt: torch.Tensor, mask=None):
     pred = pred.float()
@@ -44,12 +64,16 @@ def evaluate_all_in_output(project_root: str):
             gt = torch.from_numpy(np.load(gt_path))
             pred = torch.from_numpy(np.load(pred_path))
 
-            a, b = align_scale(pred, gt)
+            mask = make_eval_mask(gt, max_depth=10.0, border=3)
+
+            a, b = align_scale(pred, gt, mask=mask)
             pred_scaled = a * pred + b
 
-            rmse = compute_rmse(pred_scaled, gt)
-            absrel = compute_abs_rel(pred_scaled, gt)
-            delta1 = compute_delta1(pred_scaled, gt)
+
+            rmse = compute_rmse(pred_scaled, gt, mask=mask)
+            absrel = compute_abs_rel(pred_scaled, gt, mask=mask)
+            delta1 = compute_delta1(pred_scaled, gt, mask=mask)
+
 
             np.save(scaled_path, pred_scaled.cpu().numpy().astype("float32"))
 

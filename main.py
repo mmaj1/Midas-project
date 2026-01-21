@@ -12,6 +12,7 @@ sys.path.append(os.path.join(project_root, "midas_wrapper"))
 from metrics import compute_rmse, compute_abs_rel, compute_delta1
 from evaluate_midas import align_scale
 from run_midas import load_midas, run_midas_on_image
+from evaluate_midas import make_eval_mask
 
 
 def menu():
@@ -63,15 +64,18 @@ def process_all_images():
         pred = torch.from_numpy(depth_pred)
         pred = torch.nan_to_num(pred, nan=0.0)
 
-        a, b = align_scale(pred, gt)
+        mask = make_eval_mask(gt, max_depth=10.0, border=3)
+
+        a, b = align_scale(pred, gt, mask=mask)
         pred_scaled = a * pred + b
+
 
         scaled_path = os.path.join(work_dir, "depth_midas_scaled.npy")
         np.save(scaled_path, pred_scaled.cpu().numpy().astype("float32"))
 
-        rmse = compute_rmse(pred_scaled, gt)
-        absrel = compute_abs_rel(pred_scaled, gt)
-        delta1 = compute_delta1(pred_scaled, gt)
+        rmse = compute_rmse(pred_scaled, gt, mask=mask)
+        absrel = compute_abs_rel(pred_scaled, gt, mask=mask)
+        delta1 = compute_delta1(pred_scaled, gt, mask=mask)
 
         metrics = {
             "a": float(a),
