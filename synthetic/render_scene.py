@@ -45,6 +45,41 @@ def apply_rt(verts, R=None, t=None):
     if t is not None:
         verts = verts + t
     return verts
+def save_depth_png(depth: np.ndarray, png_path: str):
+    depth = np.nan_to_num(depth, nan=0.0)
+    d_min = depth.min()
+    d_max = depth.max()
+    if d_max - d_min < 1e-8:
+        depth_norm = np.zeros_like(depth, dtype=np.uint8)
+    else:
+        depth_norm = ((depth - d_min) / (d_max - d_min) * 255).astype(np.uint8)
+
+    import cv2
+    cv2.imwrite(png_path, depth_norm)
+
+def checker_texture(verts, base=(0.8, 0.8, 0.8), scale=8.0):
+    v = verts.clone()
+
+    v_min = v.min(dim=0).values
+    v_max = v.max(dim=0).values
+    v = (v - v_min) / (v_max - v_min + 1e-6)
+
+    check = (
+        (torch.floor(v[:, 0] * scale) +
+         torch.floor(v[:, 1] * scale) +
+         torch.floor(v[:, 2] * scale)) % 2
+    ).float()
+
+    col1 = torch.tensor(base) * 0.6
+    col2 = torch.tensor(base) * 1.1
+
+    colors = torch.where(
+        check.unsqueeze(1) > 0,
+        col1,
+        col2,
+    )
+    return torch.clamp(colors, 0.0, 1.0)
+
 def add_edge_shading(
     verts: torch.Tensor,
     colors: torch.Tensor,
@@ -87,7 +122,7 @@ def make_renderer(cameras):
     )
     lights = PointLights(
         device=device,
-        location=[[2.5, 5.0, 2.5]],   # JEDNO światło
+        location=[[2.5, 5.0, 2.5]],   
         ambient_color=((0.25, 0.25, 0.25),),
         diffuse_color=((0.6, 0.6, 0.6),),
         specular_color=((0.2, 0.2, 0.2),),
@@ -210,15 +245,25 @@ def create_walls(
 
     # ================= PODŁOGA =================
     floor_center = torch.tensor([0.0, floor_thick, 0.0])
-    v_floor, f_floor, c_floor = create_box_VFC(
+    v_floor, f_floor, _ = create_box_VFC(
         sx=floor_size,
         sy=floor_size,
         sz=floor_thick,
-        color=wall_color,
+        color=(1, 1, 1),  # dummy
         R=R_env,
         t=floor_center,
     )
+
+    c_floor = checker_texture(
+        v_floor,
+        base=(0.85, 0.85, 0.85),
+        scale=10.0,
+    )
+
+    c_floor = add_edge_shading(v_floor, c_floor, strength=0.25)
     parts.append((v_floor, f_floor, c_floor))
+
+
 
     # ================= ŚCIANY =================
     wall_center_y = 2.0 * floor_thick + wall_height / 2.0
@@ -240,7 +285,9 @@ def create_walls(
         R=R_env,
         t=wall_z_center,
     )
+    c_back = checker_texture(v_back, base=(0.9, 0.9, 0.7), scale=8.0)
     parts.append((v_back, f_back, c_back))
+
 
 
     # ŚCIANA "X" (obejmuje całą krawędź podłogi wzdłuż Z)
@@ -257,6 +304,7 @@ def create_walls(
         R=R_env,
         t=wall_x_center,
     )
+    c_side = checker_texture(v_side, base=(0.9, 0.9, 0.7), scale=8.0)
     parts.append((v_side, f_side, c_side))
 
 
@@ -274,7 +322,7 @@ def merge_parts(parts, add_walls=False, R_part=None, cam_center_world=None):
             cam_center_world=cam_center_world,
             floor_angle_deg=45.0,
             R_part=R_part,
-            wall_height=6.0,   # <- tu możesz jeszcze zwiększyć
+            wall_height=6.0,   
         )
 
     verts_all, faces_all, cols_all = [], [], []
@@ -397,7 +445,13 @@ def render_and_save(renderer, mesh, cameras, rgb_path, depth_path):
     depth[valid] = pts_cam[:, 2]              
 
     Image.fromarray(rgb_image).save(rgb_path)
-    np.save(depth_path, depth.cpu().numpy())
+
+    depth_np = depth.cpu().numpy()
+    np.save(depth_path, depth_np)
+
+    png_path = depth_path.replace(".npy", ".png")
+    save_depth_png(depth_np, png_path)
+
 
 
 def two_tables_scene(renderer, cameras):
@@ -433,6 +487,12 @@ def two_tables_scene(renderer, cameras):
         R=R_up,
         t=torch.tensor([0.0, top_y, 0.0]),
     )
+    c_top = checker_texture(
+        v_top,
+        base=(0.65, 0.45, 0.30),
+        scale=6.0,
+    )
+
     c_top = add_edge_shading(v_top, c_top, 0.45)
     parts_1.append((v_top, f_top, c_top))
 
@@ -476,6 +536,12 @@ def two_tables_scene(renderer, cameras):
         R=R_up,
         t=torch.tensor([0.0, top_y, 0.0]),
     )
+    c_top2 = checker_texture(
+        v_top,
+        base=(0.65, 0.45, 0.30),
+        scale=6.0,
+    )
+
     c_top2 = add_edge_shading(v_top2, c_top2, 0.45)
     parts_2.append((v_top2, f_top2, c_top2))
 
@@ -681,11 +747,11 @@ def render_scene():
     render_and_save(renderer, mesh,cameras,
                     os.path.join(OUTPUT_DIR, f"rgb_{idx:04}.png"),
                     os.path.join(OUTPUT_DIR, f"depth_gt_{idx:04}.npy"))
-    # === KAMERA DEDYKOWANA DLA STOŁU ===
+    # kamera dla 1 stolu
     Rcam_table, Tcam_table = look_at_view_transform(
-        dist=10.5,    # dalej, żeby cały stół się zmieścił
-        elev=20.0,    # lekko z góry
-        azim=35.0     # ładny kąt „produktowy”
+        dist=10.5,   
+        elev=20.0,    
+        azim=35.0     
     )
     cam_center_world = (-Rcam_table[0].t() @ Tcam_table[0])
     cameras_table = FoVPerspectiveCameras(
@@ -697,27 +763,15 @@ def render_scene():
 
     renderer_table = make_renderer(cameras_table)
 
-      # --- stół + ostrosłup (naprawione nogi) ---
+      # stół + ostrosłup
 
     top_sx, top_sy, top_thick = 2.2, 1.3, 0.12
     leg_radius = 0.12
     leg_height = 1.4
-        # === PARAMETRY OTOCZENIA (PODŁOGA + ŚCIANY) ===
-    # floor_thick = 0.08
-    # floor_size = 6.0          # pół-wymiar podłogi
-    # wall_height = 3.0
-    # wall_thick = 0.08
-    # wall_width = 6.0
-
-    # wall_color = (0.95, 0.95, 0.65)  # jasno-żółty
-
-    # Z -> Y (bo Twoje prymitywy rosną po Z, a "góra" w scenie jest po Y)
     R_up = rot_x(torch.tensor(-np.pi / 2.0))
 
-    # "inna orientacja" stołu w poziomie
     R_spin = rot_y(torch.tensor(np.deg2rad(35.0)))
 
-    # Elementy budujemy tylko z R_up
     R_part = R_up
 
     legs_center_y = leg_height / 2.0
@@ -732,14 +786,19 @@ def render_scene():
         R=R_part,
         t=torch.tensor([0.0, top_center_y, 0.0]),
     )
+    c_top = checker_texture(
+        v_top,
+        base=(0.65, 0.45, 0.30),
+        scale=6.0,
+    )
     c_top = add_edge_shading(
     v_top,
     c_top,
-    strength=0.45,
+    strength=0.6,
     )
     parts.append((v_top, f_top, c_top))
 
-    # nogi - przy rogach
+    # nogi 
     inset = leg_radius * 1.6
     xs = [-(top_sx - inset), (top_sx - inset)]
     zs = [-(top_sy - inset), (top_sy - inset)]
@@ -761,19 +820,28 @@ def render_scene():
     pyr_height = 0.85
     pyramid_base_y = leg_height + 2.0 * top_thick
 
-    v_pyr, f_pyr, c_pyr = create_pyramid_VFC(
+    v_pyr, f_pyr, _ = create_pyramid_VFC(
         base=pyr_base,
         height=pyr_height,
-        color=(0.85, 0.75, 0.15),
+        color=(1, 1, 1),
         R=R_part,
         t=torch.tensor([0.0, pyramid_base_y, 0.0]),
     )
+
+    c_pyr = checker_texture(
+        v_pyr,
+        base=(0.85, 0.75, 0.15),
+        scale=4.0,
+    )
+
     c_pyr = add_edge_shading(
         v_pyr,
         c_pyr,
-        strength=0.6,
+        strength=0.65,
     )
+
     parts.append((v_pyr, f_pyr, c_pyr))
+
 
     # scalenie
     v_all, f_all, c_all = merge_parts(

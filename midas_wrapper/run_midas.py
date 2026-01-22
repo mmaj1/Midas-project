@@ -5,6 +5,17 @@ import numpy as np
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def save_depth_png(depth: np.ndarray, png_path: str):
+    depth = np.nan_to_num(depth, nan=0.0)
+    d_min = depth.min()
+    d_max = depth.max()
+    if d_max - d_min < 1e-8:
+        depth_norm = np.zeros_like(depth, dtype=np.uint8)
+    else:
+        depth_norm = ((depth - d_min) / (d_max - d_min) * 255).astype(np.uint8)
+
+    import cv2
+    cv2.imwrite(png_path, depth_norm)
 
 def load_midas(model_type: str = "DPT_Large"):
     midas = torch.hub.load("intel-isl/MiDaS", model_type)
@@ -49,7 +60,12 @@ def run_midas_on_image(
 
     depth_pred = prediction[0].cpu().numpy().astype("float32")
     np.save(output_npy_path, depth_pred)
+
+    png_path = output_npy_path.replace(".npy", ".png")
+    save_depth_png(depth_pred, png_path)
+
     return depth_pred
+
 
 
 def main():

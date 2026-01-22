@@ -10,16 +10,14 @@ sys.path.append(os.path.join(project_root, "evaluation"))
 sys.path.append(os.path.join(project_root, "midas_wrapper"))
 
 from metrics import compute_rmse, compute_abs_rel, compute_delta1
-from evaluate_midas import align_scale
-from run_midas import load_midas, run_midas_on_image
-from evaluate_midas import make_eval_mask
-
+#from evaluate_midas import align_scale
+from run_midas import load_midas, run_midas_on_image, save_depth_png
+from evaluate_midas import make_edge_object_mask, align_and_scale_best
 
 def menu():
     print("\n1 - Przetwarzanie obrazów MiDaS")
     print("2 - Badanie punktu na obrazie")
     print("3 - Generowanie scen 3D")
-    print("4 - Konwersja map głębi .npy → .png")
     print("0 - Powrót do menu")
     return input("Wybierz opcję: ").strip()
 
@@ -28,7 +26,11 @@ def process_all_images():
     input_dir = os.path.join(project_root, "synthetic", "output")
     output_root = os.path.join(project_root, "synthetic", "glebia")
     os.makedirs(output_root, exist_ok=True)
-    files = [f for f in os.listdir(input_dir) if f.lower().endswith(".png")]
+    files = [
+        f for f in os.listdir(input_dir)
+        if f.lower().endswith(".png") and f.startswith("rgb_")
+    ]
+
     if not files:
         print("Brak plików PNG w synthetic/output")
         return
@@ -64,26 +66,40 @@ def process_all_images():
         pred = torch.from_numpy(depth_pred)
         pred = torch.nan_to_num(pred, nan=0.0)
 
-        mask = make_eval_mask(gt, max_depth=10.0, border=3)
+        mask = make_edge_object_mask(
+            gt,
+            border=3,
+            grad_pct=70.0,
+            depth_pct=(10.0, 90.0),
+        )
 
-        a, b = align_scale(pred, gt, mask=mask)
-        pred_scaled = a * pred + b
+
+
+        method, (a, b), pred_scaled = align_and_scale_best(pred, gt, mask)
+
 
 
         scaled_path = os.path.join(work_dir, "depth_midas_scaled.npy")
-        np.save(scaled_path, pred_scaled.cpu().numpy().astype("float32"))
+        pred_np = pred_scaled.cpu().numpy().astype("float32")
+        np.save(scaled_path, pred_np)
+
+        png_path = scaled_path.replace(".npy", ".png")
+        save_depth_png(pred_np, png_path)
+
 
         rmse = compute_rmse(pred_scaled, gt, mask=mask)
         absrel = compute_abs_rel(pred_scaled, gt, mask=mask)
         delta1 = compute_delta1(pred_scaled, gt, mask=mask)
 
         metrics = {
+            "method": method,
             "a": float(a),
             "b": float(b),
             "rmse": float(rmse),
             "absrel": float(absrel),
             "delta1": float(delta1),
         }
+
         metrics_path = os.path.join(work_dir, "metrics.json")
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=4)
@@ -130,8 +146,6 @@ def main():
             run_point_inspection()
         elif choice == "3":
             generate_scene()
-        elif choice == "4":
-            convert_depth_to_png()
         elif choice == "0":
             continue
         else:
