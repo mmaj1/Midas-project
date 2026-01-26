@@ -86,13 +86,10 @@ def add_edge_shading(
     strength=0.35,
     axis_pairs=((0, 1), (0, 2), (1, 2)),
 ):
-    """
-    Fake krawędzie: przyciemnia okolice krawędzi bryły.
-    Działa najlepiej dla prostopadłościanów i ostrosłupów.
-    """
+    # przyciemnia okolice krawędzi bryły.
+
     v = verts.clone()
 
-    # normalizacja współrzędnych
     v_min = v.min(dim=0).values
     v_max = v.max(dim=0).values
     v_norm = (v - v_min) / (v_max - v_min + 1e-6)
@@ -110,7 +107,6 @@ def add_edge_shading(
     edge_strength = torch.clamp(edge_strength, 0.0, 1.0)
     edge_strength = 1.0 - edge_strength
 
-    # przyciemnienie
     shaded = colors * (1.0 - strength * edge_strength.unsqueeze(1))
     return torch.clamp(shaded, 0.0, 1.0)
 
@@ -142,10 +138,7 @@ def make_renderer(cameras):
     )
 
 def create_box_VFC(sx=2.0, sy=1.0, sz=0.2, color=(0.7, 0.7, 0.7), R=None, t=None):
-    """
-    Graniastosłup prostokątny (box) o pół-wymiarach sx, sy, sz.
-    (czyli pełne wymiary: 2*sx x 2*sy x 2*sz)
-    """
+
     verts = torch.tensor(
         [
             [-sx, -sy, -sz], [ sx, -sy, -sz], [ sx,  sy, -sz], [-sx,  sy, -sz],
@@ -179,19 +172,19 @@ def create_pyramid_VFC(base=0.8, height=0.9, color=(0.9, 0.8, 0.2), R=None, t=No
     b = base
     verts = torch.tensor(
         [
-            [-b, -b, 0.0],  # 0
-            [ b, -b, 0.0],  # 1
-            [ b,  b, 0.0],  # 2
-            [-b,  b, 0.0],  # 3
-            [0.0, 0.0, height],  # 4 apex
+            [-b, -b, 0.0],  
+            [ b, -b, 0.0],  
+            [ b,  b, 0.0],  
+            [-b,  b, 0.0],  
+            [0.0, 0.0, height], 
         ],
         dtype=torch.float32,
     )
 
     faces = torch.tensor(
         [
-            [0, 1, 2], [0, 2, 3],  # base (2 trójkąty)
-            [0, 1, 4],  # sides
+            [0, 1, 2], [0, 2, 3],  
+            [0, 1, 4],  
             [1, 2, 4],
             [2, 3, 4],
             [3, 0, 4],
@@ -206,18 +199,15 @@ def create_pyramid_VFC(base=0.8, height=0.9, color=(0.9, 0.8, 0.2), R=None, t=No
 
 def create_walls(
     parts,
-    cam_center_world,          # <- NOWE: pozycja kamery w świecie (Tensor [3])
+    cam_center_world,         
     floor_angle_deg=45.0,
-    floor_size=8.0,            # pół-wymiar podłogi
-    floor_thick=0.08,          # pół-grubość
-    wall_height=12.0,           # wyższe ściany
-    wall_thick=0.08,           # pół-grubość
-    R_part=None,               # R_up (Z->Y)
+    floor_size=8.0,            
+    floor_thick=0.08,          
+    wall_height=12.0,           
+    wall_thick=0.08,           
+    R_part=None,              
 ):
-    """
-    Podłoga + 2 ściany na "właściwym" rogu, wybieranym AUTOMATYCZNIE względem kamery.
-    Ściany są pionowe i stykają się z górą podłogi.
-    """
+
 
     if R_part is None:
         raise ValueError("create_walls: R_part jest wymagane")
@@ -226,30 +216,25 @@ def create_walls(
 
     wall_color = (0.95, 0.95, 0.65)
 
-    # Układ środowiska (podłoga obrócona o 45°) + mapowanie Z->Y
     R_env = rot_y(torch.tensor(np.deg2rad(floor_angle_deg))) @ R_part
 
-    # Lokalna oś X i Z podłogi w świecie
-    # (kolumny macierzy obrotu to osie lokalne w świecie)
     floor_x_world = (torch.tensor([1.0, 0.0, 0.0]) @ R_env.t())
     floor_z_world = (torch.tensor([0.0, 0.0, 1.0]) @ R_env.t())
 
-    # Rzut kamery na osie podłogi (znak mówi, z której strony stoi kamera)
     cam_x = torch.dot(cam_center_world, floor_x_world).item()
     cam_z = torch.dot(cam_center_world, floor_z_world).item()
 
-    # Wybieramy krawędzie NAJDALSZE od kamery:
-    # jeśli kamera jest po stronie +X, ściana ma być na -X (i odwrotnie)
+
     sx = -1.0 if cam_x > 0 else 1.0
     sz = -1.0 if cam_z > 0 else 1.0
 
-    # ================= PODŁOGA =================
+    #  PODŁOGA 
     floor_center = torch.tensor([0.0, floor_thick, 0.0])
     v_floor, f_floor, _ = create_box_VFC(
         sx=floor_size,
         sy=floor_size,
         sz=floor_thick,
-        color=(1, 1, 1),  # dummy
+        color=(1, 1, 1),  
         R=R_env,
         t=floor_center,
     )
@@ -265,12 +250,12 @@ def create_walls(
 
 
 
-    # ================= ŚCIANY =================
+    #  ŚCIANY
     wall_center_y = 2.0 * floor_thick + wall_height / 2.0
     edge_offset = (floor_size - wall_thick)
-    y_shift = floor_size   # przesunięcie o pół długości podłogi w X
+    y_shift = floor_size   
     x_back = sx * floor_size
-   # ŚCIANA "Z" (obejmuje całą krawędź podłogi wzdłuż X)
+
     wall_z_center = (
         torch.tensor([0.0, wall_center_y+y_shift, 0.0]) +
         (torch.tensor([0.0, x_back, 0.0]) @ R_env.t()) +  
@@ -278,9 +263,9 @@ def create_walls(
     )
 
     v_back, f_back, c_back = create_box_VFC(
-        sx=floor_size,            # długość (X)
-        sy=wall_thick,            # grubość (Z)
-        sz=wall_height / 2.0,     # wysokość (Y po R_part)
+        sx=floor_size,         
+        sy=wall_thick,           
+        sz=wall_height / 2.0,    
         color=wall_color,
         R=R_env,
         t=wall_z_center,
@@ -290,16 +275,16 @@ def create_walls(
 
 
 
-    # ŚCIANA "X" (obejmuje całą krawędź podłogi wzdłuż Z)
+    # ŚCIANA "X" ( wzdłuż Z)
     wall_x_center = (
     torch.tensor([0.0, wall_center_y, 0.0]) +
     (torch.tensor([(sx * (edge_offset + wall_thick)), 0.0, 0.0]) @ R_env.t())
 )
 
     v_side, f_side, c_side = create_box_VFC(
-        sx=wall_thick,            # grubość
-        sz=wall_height / 2.0,     # wysokość
-        sy=floor_size,            # długość
+        sx=wall_thick,            
+        sz=wall_height / 2.0,    
+        sy=floor_size,           
         color=wall_color,
         R=R_env,
         t=wall_x_center,
@@ -423,23 +408,22 @@ def render_and_save(renderer, mesh, cameras, rgb_path, depth_path):
 
     fragments = renderer.rasterizer(mesh)
 
-    # --- PRAWDZIWA DEPTH ---
-    verts = mesh.verts_packed()              # (V, 3)
-    faces = mesh.faces_packed()              # (F, 3)
 
-    pix_to_face = fragments.pix_to_face[0, ..., 0]   # (H, W)
-    bary = fragments.bary_coords[0, ..., 0, :]        # (H, W, 3)
+    verts = mesh.verts_packed()             
+    faces = mesh.faces_packed()             
+
+    pix_to_face = fragments.pix_to_face[0, ..., 0]   
+    bary = fragments.bary_coords[0, ..., 0, :]        
 
     depth = torch.zeros_like(pix_to_face, dtype=torch.float32)
 
     valid = pix_to_face >= 0
     face_ids = pix_to_face[valid]
-    tri = faces[face_ids]                    # (N, 3)
-    tri_verts = verts[tri]                   # (N, 3, 3)
+    tri = faces[face_ids]                  
+    tri_verts = verts[tri]               
 
     pts_world = (tri_verts * bary[valid].unsqueeze(-1)).sum(dim=1)
 
-    # transform world → camera
     pts_cam = cameras.get_world_to_view_transform().transform_points(pts_world)
 
     depth[valid] = pts_cam[:, 2]              
@@ -461,19 +445,17 @@ def two_tables_scene(renderer, cameras):
     - stół 2: sześcian
     """
 
-    # ================= KAMERA =================
+    # KAMERA 
     Rcam = cameras.R[0]
     Tcam = cameras.T[0]
     cam_center_world = (-Rcam.t() @ Tcam)
 
-    # ================= ORIENTACJA =================
+    #  ORIENTACJA 
     R_up = rot_x(torch.tensor(-np.pi / 2.0))
 
     parts = []
 
-    # ======================================================
-    # STÓŁ 1 – BLIŻEJ KAMERY (ROMB / OSTROSŁUP)
-    # ======================================================
+    # stol 1
     parts_1 = []
 
     top_sx, top_sy, top_thick = 2.0, 1.2, 0.12
@@ -509,7 +491,7 @@ def two_tables_scene(renderer, cameras):
             )
             parts_1.append((v_leg, f_leg, c_leg))
 
-    # romb (ostrosłup)
+    #  ostrosłup
     v_pyr, f_pyr, c_pyr = create_pyramid_VFC(
         base=0.5,
         height=0.8,
@@ -524,9 +506,7 @@ def two_tables_scene(renderer, cameras):
     for v, f, c in parts_1:
         parts.append((apply_rt(v, t=torch.tensor([-1.5, 0.0, 0.5])), f, c))
 
-    # ======================================================
-    # STÓŁ 2 – DALEJ (SZEŚCIAN)
-    # ======================================================
+    # stol 2
     parts_2 = []
 
     # blat
@@ -567,15 +547,13 @@ def two_tables_scene(renderer, cameras):
     c_cube = add_edge_shading(v_cube, c_cube, 0.6)
     parts_2.append((v_cube, f_cube, c_cube))
 
-    # obrót + przesunięcie stołu 2
+    # obrót, przesunięcie stołu 2
     R_spin = rot_y(torch.tensor(np.deg2rad(-40.0)))
     for v, f, c in parts_2:
         v2 = apply_rt(v, R=R_spin, t=torch.tensor([2.0, 0.0, -2.0]))
         parts.append((v2, f, c))
 
-    # ======================================================
-    # POKÓJ (PODŁOGA + ŚCIANY)
-    # ======================================================
+    #pokoj
     v_all, f_all, c_all = merge_parts(
         parts,
         add_walls=True,
@@ -586,21 +564,12 @@ def two_tables_scene(renderer, cameras):
     return build_mesh(v_all, f_all, c_all)
 
 def table_cabinet_chair_scene(renderer, cameras):
-    """
-    Scena: pokój + stolik + szafa (przy ścianie X) + krzesło
-    """
 
-    # ================= KAMERA =================
-    cam_center_world = cameras.get_camera_center()[0]
-
-    # ================= ORIENTACJA =================
+    cam_center_world = cameras.get_camera_center()[0]  
     R_up = rot_x(torch.tensor(-np.pi / 2.0))
-
     parts = []
 
-    # ======================================================
-    # STÓŁ
-    # ======================================================
+    # stol
     top_sx, top_sy, top_thick = 2.0, 1.2, 0.12
     leg_radius, leg_height = 0.12, 1.3
     top_y = leg_height + top_thick
@@ -628,9 +597,9 @@ def table_cabinet_chair_scene(renderer, cameras):
             )
             parts.append((v_leg, f_leg, c_leg))
 
-    # ======================================================
-    # SZAFA (GRANIASTOSŁUP PRZY ŚCIANIE X)
-    # ======================================================
+    
+    # Sszafa
+    
     cabinet_w, cabinet_d, cabinet_h = 1.0, 1.5, 2.2
     cabinet_y = cabinet_h / 2.0
     v_cab, f_cab, c_cab = create_box_VFC(
@@ -643,45 +612,31 @@ def table_cabinet_chair_scene(renderer, cameras):
     )
     c_cab = add_edge_shading(v_cab, c_cab, 0.4)
     parts.append((v_cab, f_cab, c_cab))
-         # ======================================================
-    # 3 SZEŚCIANY TESTOWE – TEN SAM DEPTH (RED + BLUE)
-    # ======================================================
-
-    # pozycja kamery w świecie
+   
+    # 3 szesciany
     cam_center_world = cameras.get_camera_center()[0]
-
-    # kierunek patrzenia kamery
     view_dir = -cam_center_world
     view_dir = view_dir / torch.norm(view_dir)
-
-    # wektor w prawo (lokalny dla kamery)
     world_up = torch.tensor([0.0, 1.0, 0.0])
     right_dir = torch.cross(world_up, view_dir)
     right_dir = right_dir / torch.norm(right_dir)
 
-    # ================= PARAMETRY =================
     cube_size = 0.4
     cube_y = cube_size
 
-    d_shared = 4.0        # TA SAMA ODLEGŁOŚĆ od kamery (RED + BLUE)
-    d_far = 6.5           # DALEJ (GREEN)
-    side_offset = 1.5     # MAŁY OFFSET W LEWO
+    d_shared = 4.0        
+    d_far = 6.5          
+    side_offset = 1.5     
 
-    # ================= POZYCJE =================
-    # 🔵 NIEBIESKI – na osi kamery
     pos_blue = cam_center_world + view_dir * d_shared
-
-    # 🔴 CZERWONY – ten sam depth, ale PO LEWEJ
     pos_red = cam_center_world + view_dir * d_shared - right_dir * side_offset
-
-    # 🟢 ZIELONY – dalej
     pos_green = cam_center_world + view_dir * d_far
 
-    # ================= DODANIE DO SCENY =================
+    #  dodanie do sceny
     cube_defs = [
-        (pos_red,   (0.9, 0.2, 0.2)),  # czerwony – lewo
-        (pos_blue,  (0.2, 0.2, 0.9)),  # niebieski – środek
-        (pos_green, (0.2, 0.9, 0.2)),  # zielony – daleko
+        (pos_red,   (0.9, 0.2, 0.2)), 
+        (pos_blue,  (0.2, 0.2, 0.9)),  
+        (pos_green, (0.2, 0.9, 0.2)),  
     ]
 
     for pos, color in cube_defs:
@@ -695,9 +650,7 @@ def table_cabinet_chair_scene(renderer, cameras):
         c_cube = add_edge_shading(v_cube, c_cube, strength=0.5)
         parts.append((v_cube, f_cube, c_cube))
 
-    # ======================================================
-    # POKÓJ (ŚCIANY + PODŁOGA)
-    # ======================================================
+    # pokoj
     v_all, f_all, c_all = merge_parts(
         parts,
         add_walls=True,
@@ -763,8 +716,7 @@ def render_scene():
 
     renderer_table = make_renderer(cameras_table)
 
-      # stół + ostrosłup
-
+    # stół + ostrosłup
     top_sx, top_sy, top_thick = 2.2, 1.3, 0.12
     leg_radius = 0.12
     leg_height = 1.4
@@ -851,7 +803,6 @@ def render_scene():
         cam_center_world=cam_center_world,
     )
 
-    # <-- KLUCZ: obrót CAŁEGO stołu po złożeniu (obraca też pozycje nóg)
     v_all = apply_rt(v_all, R=R_spin, t=None)
 
     mesh = build_mesh(v_all, f_all, c_all)
@@ -865,7 +816,7 @@ def render_scene():
     )
 
     Rcam_tt, Tcam_tt = look_at_view_transform(
-        dist=11.0,   # dalej
+        dist=11.0,   
         elev=20.0,
         azim=0.0
     )
@@ -887,9 +838,7 @@ def render_scene():
         os.path.join(OUTPUT_DIR, f"rgb_{idx:04}.png"),
         os.path.join(OUTPUT_DIR, f"depth_gt_{idx:04}.npy"),
     )
-# ======================================================
-# SCENA: STÓŁ + SZAFA + KRZESŁO
-# ======================================================
+# scena ze stolem,szafa,szescianami
     Rcam_ttt, Tcam_ttt = look_at_view_transform(
         dist=10.0,   # dalej
         elev=30.0,

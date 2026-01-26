@@ -21,7 +21,7 @@ def run_for_image(project_root: str, image_name: str):
         print("Brak pliku obrazu.")
         return
     if not os.path.isfile(depth_pred_path):
-        print("Brak przeskalowanej mapy MiDaS dla tego obrazu. Użyj opcji 1 w menu.")
+        print("Brak przeskalowanej mapy MiDaS dla tego obrazu. Użyj opcji 1 w menu")
         return
     if not os.path.isfile(depth_gt_path):
         print("Brak ground truth dla tego obrazu.")

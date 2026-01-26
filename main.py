@@ -10,7 +10,6 @@ sys.path.append(os.path.join(project_root, "evaluation"))
 sys.path.append(os.path.join(project_root, "midas_wrapper"))
 
 from metrics import compute_rmse, compute_abs_rel, compute_delta1
-#from evaluate_midas import align_scale
 from run_midas import load_midas, run_midas_on_image, save_depth_png
 from evaluate_midas import make_edge_object_mask, align_and_scale_best
 
@@ -73,11 +72,7 @@ def process_all_images():
             depth_pct=(10.0, 90.0),
         )
 
-
-
         method, (a, b), pred_scaled = align_and_scale_best(pred, gt, mask)
-
-
 
         scaled_path = os.path.join(work_dir, "depth_midas_scaled.npy")
         pred_np = pred_scaled.cpu().numpy().astype("float32")
